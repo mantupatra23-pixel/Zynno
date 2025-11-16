@@ -5,3 +5,5 @@ httpx
 motor
 pydantic
 reportlab
+pytesseract
+Pillow
