@@ -1,18 +1,29 @@
-# main.py (FINAL — Doubt saving + Teacher dashboard + Rate limit + Auth + Stats)
+# main.py (FINAL CLEAN IMPORT BLOCK)
+
 import os
 import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Header, Depends, Request
+# FastAPI core imports
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Form
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+
+# Models & Validation
 from pydantic import BaseModel, Field, constr
+
+# MongoDB (async driver)
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
+
+# External requests
 import httpx
+
+# Environment loader
 from dotenv import load_dotenv
+load_dotenv()
 
 load_dotenv()
 
