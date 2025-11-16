@@ -1,5 +1,4 @@
-# main.py (FINAL CLEAN IMPORT BLOCK)
-
+# main.py — CLEAN IMPORT BLOCK (replace the old one with this)
 import os
 import asyncio
 import logging
@@ -7,10 +6,9 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
 # FastAPI core imports
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Form
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Form, Header
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi import Header
 
 # Models & Validation
 from pydantic import BaseModel, Field, constr
@@ -19,13 +17,11 @@ from pydantic import BaseModel, Field, constr
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
 
-# External requests
+# External requests / http client
 import httpx
 
 # Environment loader
 from dotenv import load_dotenv
-load_dotenv()
-
 load_dotenv()
 
 # ---------- ENV ----------
@@ -33,8 +29,8 @@ MONGO_URI = os.getenv("MONGO_URI")
 MONGO_DB_NAME = os.getenv("MONGO_DB_NAME") or "zynno"
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 TEACHER_CHAT_ID = os.getenv("TEACHER_CHAT_ID")
-TEACHER_API_KEY = os.getenv("TEACHER_API_KEY")  # required to protect teacher endpoints
-RATE_LIMIT_MAX_PER_HOUR = int(os.getenv("RATE_LIMIT_MAX_PER_HOUR") or 6)  # default 6 doubts/hour per student/ip
+TEACHER_API_KEY = os.getenv("TEACHER_API_KEY")
+RATE_LIMIT_MAX_PER_HOUR = int(os.getenv("RATE_LIMIT_MAX_PER_HOUR", "60"))
 
 # ---------- Logging ----------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
