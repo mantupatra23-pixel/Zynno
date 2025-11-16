@@ -1,0 +1,10 @@
+cat > requirements.txt <<'REQ'
+fastapi==0.95.2
+pydantic<2.0
+uvicorn[standard]
+python-multipart
+python-dotenv
+openai
+pillow
+pytesseract
+REQ
