@@ -10,6 +10,7 @@ from typing import Optional, List, Dict, Any
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Form
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Header
 
 # Models & Validation
 from pydantic import BaseModel, Field, constr
