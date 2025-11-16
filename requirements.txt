@@ -1,5 +1,6 @@
 fastapi
-uvicorn
-requests
-pydantic
+uvicorn[standard]
 python-dotenv
+httpx
+motor
+pydantic
