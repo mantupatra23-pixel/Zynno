@@ -7,6 +7,7 @@ from typing import Optional, List, Dict, Any
 
 # FastAPI core imports
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Form, Header
+from fastapi import Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
