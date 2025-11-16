@@ -1,183 +1,272 @@
 # main.py
-# Full FastAPI backend with MongoDB (motor) and Telegram notify
 import os
 import asyncio
-from typing import Optional
+import logging
+from datetime import datetime, timedelta
+from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, BackgroundTasks, HTTPException
-from pydantic import BaseModel
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Header, Depends, Request
+from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel, Field
+from motor.motor_asyncio import AsyncIOMotorClient
+from bson import ObjectId
+import httpx
 from dotenv import load_dotenv
 
-import httpx
-from motor.motor_asyncio import AsyncIOMotorClient
-
-# load .env if present (local dev)
+# load .env locally if present (won't override server env)
 load_dotenv()
 
-# --- Config from env ---
-TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")  # from BotFather
-TEACHER_CHAT_ID = os.getenv("TEACHER_CHAT_ID")        # numeric string
-MONGO_URI = os.getenv("MONGO_URI")                    # mongodb+srv://.../...
+# ---------- Config / env ----------
+MONGO_URI = os.getenv("MONGO_URI")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TEACHER_CHAT_ID = os.getenv("TEACHER_CHAT_ID")
+TEACHER_API_KEY = os.getenv("TEACHER_API_KEY")  # optional simple auth
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")  # optional for future
 
 if not MONGO_URI:
-    # app can still start (but DB endpoints will error); you can also raise here.
-    print("WARNING: MONGO_URI not set. DB operations will fail until set.")
+    logging.warning("MONGO_URI not set — DB features will fail until provided.")
+if not TELEGRAM_BOT_TOKEN:
+    logging.warning("TELEGRAM_BOT_TOKEN not set — telegram notifications will be disabled.")
+if not TEACHER_CHAT_ID:
+    logging.warning("TEACHER_CHAT_ID not set — teacher notifications may fail.")
 
-# --- App init ---
-app = FastAPI(title="Zynno - Backend")
+# ---------- Logging ----------
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("app")
 
-# DB client will be created on startup
+# ---------- FastAPI app ----------
+app = FastAPI(title="Zynno - Doubt backend")
+
+# CORS: adjust allowed origins in production
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # restrict this in prod
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------- Mongo connection ----------
 mongo_client: Optional[AsyncIOMotorClient] = None
-db = None  # type: ignore
+db = None
 
-# --- Pydantic payloads ---
-class NotifyPayload(BaseModel):
-    student_name: str
-    student_class: str
-    doubt_text: str
-    save_to_db: Optional[bool] = True  # whether to save this doubt into DB
+async def get_db():
+    return db
 
+# ---------- Pydantic models ----------
+class DoubtIn(BaseModel):
+    student_name: str = Field(..., min_length=1)
+    student_class: str = Field(..., min_length=1)
+    doubt_text: str = Field(..., min_length=1)
 
-class DoubtDoc(BaseModel):
-    student_name: str
-    student_class: str
-    doubt_text: str
-    status: str = "new"  # new / answered
-    created_at: Optional[float] = None
+class DoubtOut(DoubtIn):
+    id: str
+    status: str
+    created_at: datetime
+    teacher_reply: Optional[str] = None
+    notify_status: Optional[str] = None  # success/failed/queued
 
+# ---------- Helpers ----------
+def serialize_doc(d: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(d)
+    _id = out.pop("_id", None)
+    out["id"] = str(_id) if _id else None
+    # convert datetimes to iso
+    if isinstance(out.get("created_at"), datetime):
+        out["created_at"] = out["created_at"].isoformat()
+    return out
 
-# --- Telegram send helper (async) ---
-async def send_telegram_message_async(text: str):
-    """Send message to teacher via Telegram Bot API (async)."""
-    if not TELEGRAM_BOT_TOKEN or not TEACHER_CHAT_ID:
-        print("Telegram token/ID not configured. Skipping Telegram send.")
-        return {"ok": False, "reason": "telegram_not_configured"}
+# ---------- Simple in-memory rate limiter (per-ip) ----------
+RATE_LIMIT_MAX = 20  # requests
+RATE_LIMIT_WINDOW = timedelta(minutes=60)
+_rate_store: Dict[str, List[datetime]] = {}
 
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": TEACHER_CHAT_ID,
-        "text": text,
-        "parse_mode": "HTML",
-        # "disable_web_page_preview": True
-    }
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            resp = await client.post(url, data=payload)
-            # print status for logs
-            print("Telegram status:", resp.status_code, resp.text)
-            return {"ok": resp.status_code == 200, "status_code": resp.status_code, "text": resp.text}
-    except Exception as e:
-        print("Telegram send error:", str(e))
-        return {"ok": False, "error": str(e)}
+def check_rate_limit(ip: str) -> bool:
+    now = datetime.utcnow()
+    arr = _rate_store.get(ip, [])
+    # remove old
+    arr = [t for t in arr if now - t <= RATE_LIMIT_WINDOW]
+    if len(arr) >= RATE_LIMIT_MAX:
+        _rate_store[ip] = arr
+        return False
+    arr.append(now)
+    _rate_store[ip] = arr
+    return True
 
+# ---------- Telegram notifier with retries ----------
+async def send_telegram_message(token: str, chat_id: str, text: str) -> bool:
+    if not token or not chat_id:
+        logger.warning("Telegram token/chat id missing")
+        return False
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    payload = {"chat_id": chat_id, "text": text, "parse_mode": "HTML"}
+    async with httpx.AsyncClient(timeout=10) as client:
+        for attempt in range(1, 4):
+            try:
+                resp = await client.post(url, json=payload)
+                if resp.status_code == 200:
+                    logger.info("Telegram sent")
+                    return True
+                else:
+                    logger.warning("Telegram failed status=%s body=%s", resp.status_code, resp.text)
+            except Exception as e:
+                logger.exception("Telegram request error: %s", e)
+            await asyncio.sleep(1 * attempt)
+    return False
 
-# --- DB helpers ---
-async def save_doubt_to_db(doc: dict):
-    if not db:
-        raise RuntimeError("DB not connected")
-    col = db["doubts"]
-    res = await col.insert_one(doc)
-    return str(res.inserted_id)
+# ---------- Auth dependency for teacher endpoints ----------
+def require_teacher_api_key(x_api_key: Optional[str] = Header(None)):
+    if TEACHER_API_KEY:
+        if not x_api_key or x_api_key != TEACHER_API_KEY:
+            raise HTTPException(status_code=401, detail="Invalid API key")
+    # if TEACHER_API_KEY not set, allow but log warning
+    else:
+        logger.warning("TEACHER_API_KEY not configured — teacher endpoints open")
 
-
-# --- FastAPI Lifespan (startup/shutdown) ---
+# ---------- Startup / shutdown ----------
 @app.on_event("startup")
-async def startup_event():
+async def startup():
     global mongo_client, db
     if MONGO_URI:
         mongo_client = AsyncIOMotorClient(MONGO_URI)
-        # default DB name from connection string may be none; use 'zynno' or database from URI
-        # If using srv without db, choose one:
+        # pick database name from URI or set default
+        db_name = os.getenv("MONGO_DB_NAME") or "zynno_db"
+        db = mongo_client[db_name]
+        # ensure indexes
         try:
-            # if URI contains a default db name after '/', try to use it, else 'zynno'
-            dbname = MONGO_URI.rsplit("/", 1)[-1].split("?")[0] or "zynno"
-        except Exception:
-            dbname = "zynno"
-        db = mongo_client[dbname]
-        print("MongoDB connected, using DB:", dbname)
+            await db.doubts.create_index([("status", 1)])
+            await db.doubts.create_index([("created_at", -1)])
+            await db.doubts.create_index([("student_class", 1)])
+            logger.info("Indexes created")
+        except Exception as e:
+            logger.exception("Index creation failed: %s", e)
     else:
-        print("MONGO_URI not provided at startup. DB disabled.")
-
+        logger.warning("No MONGO_URI — DB not connected")
 
 @app.on_event("shutdown")
-async def shutdown_event():
+async def shutdown():
     global mongo_client
     if mongo_client:
         mongo_client.close()
-        print("MongoDB connection closed.")
 
+# ---------- Health endpoint ----------
+@app.get("/health")
+async def health():
+    ok = {"status": "ok", "db": False}
+    try:
+        if db:
+            await db.command("ping")
+            ok["db"] = True
+    except Exception as e:
+        logger.warning("Health check DB failed: %s", e)
+    return ok
 
-# --- Endpoints ---
-@app.get("/")
-async def root():
-    return {"status": "ok", "service": "Zynno backend"}
+# ---------- Doubt endpoints ----------
+@app.post("/doubts", response_model=Dict[str, Any])
+async def create_doubt(request: Request, payload: DoubtIn, background_tasks: BackgroundTasks, db=Depends(get_db)):
+    # rate-limit by client IP
+    client_ip = request.client.host if request.client else "unknown"
+    if not check_rate_limit(client_ip):
+        raise HTTPException(status_code=429, detail="Too many requests")
 
+    doc = payload.dict()
+    doc.update({
+        "status": "open",
+        "created_at": datetime.utcnow(),
+        "teacher_reply": None,
+        "notify_status": "queued"
+    })
 
-@app.post("/notify_teacher")
-async def notify_teacher(payload: NotifyPayload, background_tasks: BackgroundTasks):
-    """
-    Notify teacher on Telegram and save doubt to MongoDB (optional).
-    Request JSON:
-    {
-      "student_name": "Mantu",
-      "student_class": "12A",
-      "doubt_text": "Question text",
-      "save_to_db": true
-    }
-    """
-    # build message
+    if not db:
+        raise HTTPException(status_code=503, detail="db-not-configured")
+
+    res = await db.doubts.insert_one(doc)
+    doubt_id = str(res.inserted_id)
+
+    # prepare telegram text
     text = (
-        "<b>📚 New Doubt</b>\n\n"
-        f"<b>Student:</b> {payload.student_name}\n"
-        f"<b>Class:</b> {payload.student_class}\n"
-        f"<b>Doubt:</b> {payload.doubt_text}\n\n"
-        "Reply to help the student."
+        f"<b>New Doubt</b>\n"
+        f"Student: {payload.student_name}\n"
+        f"Class: {payload.student_class}\n\n"
+        f"{payload.doubt_text}\n\n"
+        f"ID: {doubt_id}"
     )
 
-    # schedule telegram send in background
-    # use asyncio.create_task to run async function in background
-    background_tasks.add_task(asyncio.create_task, send_telegram_message_async(text))
-
-    # optionally save to DB
-    saved_id = None
-    if payload.save_to_db:
-        doc = {
-            "student_name": payload.student_name,
-            "student_class": payload.student_class,
-            "doubt_text": payload.doubt_text,
-            "status": "new",
-            "created_at": asyncio.get_event_loop().time()
-        }
+    # background send + update notify_status
+    async def _notify_and_update():
+        success = await send_telegram_message(TELEGRAM_BOT_TOKEN, TEACHER_CHAT_ID, text)
+        new_status = "success" if success else "failed"
         try:
-            saved_id = await save_doubt_to_db(doc)
-        except Exception as e:
-            print("DB save error:", str(e))
-            # do not fail the endpoint if DB error, just inform
-            return {"status": "queued", "telegram": "queued", "db": "failed", "db_error": str(e)}
+            await db.doubts.update_one({"_id": res.inserted_id}, {"$set": {"notify_status": new_status}})
+        except Exception:
+            logger.exception("Failed to update notify status for %s", doubt_id)
 
-    return {"status": "queued", "telegram": "queued", "db_id": saved_id}
+    background_tasks.add_task(_notify_and_update)
+    return {"id": doubt_id, "status": "queued"}
 
-
-@app.get("/doubts")
-async def list_doubts(limit: int = 50):
-    """List recent doubts (from Mongo)."""
+@app.get("/doubts", response_model=List[Dict[str, Any]])
+async def list_doubts(status: Optional[str] = None, limit: int = 50, db=Depends(get_db), _auth=Depends(require_teacher_api_key)):
     if not db:
-        raise HTTPException(status_code=500, detail="Database not connected")
-    col = db["doubts"]
-    cursor = col.find().sort("created_at", -1).limit(limit)
-    items = []
-    async for doc in cursor:
-        doc["_id"] = str(doc["_id"])
-        items.append(doc)
-    return {"count": len(items), "doubts": items}
+        raise HTTPException(status_code=503, detail="db-not-configured")
+    query = {}
+    if status:
+        query["status"] = status
+    cursor = db.doubts.find(query).sort("created_at", -1).limit(min(limit, 200))
+    docs = []
+    async for d in cursor:
+        docs.append(serialize_doc(d))
+    return docs
 
-
-@app.post("/answer_doubt/{doubt_id}")
-async def answer_doubt(doubt_id: str, answer_text: str):
-    """Mark doubt answered and optionally message student (not implemented: student chat id)."""
+@app.get("/doubts/{doubt_id}", response_model=Dict[str, Any])
+async def get_doubt(doubt_id: str, db=Depends(get_db), _auth=Depends(require_teacher_api_key)):
     if not db:
-        raise HTTPException(status_code=500, detail="Database not connected")
-    col = db["doubts"]
-    res = await col.update_one({"_id": None}, {"$set": {"status": "answered"}})  # placeholder
-    # NOTE: If you want to message a student directly, you need student's chat id stored.
-    return {"ok": True, "note": "Implement student notify by saving student chat id when collecting doubt."}
+        raise HTTPException(status_code=503, detail="db-not-configured")
+    try:
+        oid = ObjectId(doubt_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid-id")
+    doc = await db.doubts.find_one({"_id": oid})
+    if not doc:
+        raise HTTPException(status_code=404, detail="not-found")
+    return serialize_doc(doc)
+
+class DoubtUpdate(BaseModel):
+    status: Optional[str] = None
+    teacher_reply: Optional[str] = None
+
+@app.patch("/doubts/{doubt_id}", response_model=Dict[str, Any])
+async def update_doubt(doubt_id: str, payload: DoubtUpdate, db=Depends(get_db), _auth=Depends(require_teacher_api_key)):
+    if not db:
+        raise HTTPException(status_code=503, detail="db-not-configured")
+    try:
+        oid = ObjectId(doubt_id)
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid-id")
+    update_doc = {}
+    if payload.status:
+        update_doc["status"] = payload.status
+    if payload.teacher_reply:
+        update_doc["teacher_reply"] = payload.teacher_reply
+    if not update_doc:
+        raise HTTPException(status_code=400, detail="nothing-to-update")
+    await db.doubts.update_one({"_id": oid}, {"$set": update_doc})
+    doc = await db.doubts.find_one({"_id": oid})
+    return serialize_doc(doc)
+
+# ---------- Simple ping endpoint for Telegram test ----------
+@app.post("/internal/test-telegram")
+async def test_telegram(db=Depends(get_db), _auth=Depends(require_teacher_api_key)):
+    txt = f"Test message from backend at {datetime.utcnow().isoformat()}"
+    ok = await send_telegram_message(TELEGRAM_BOT_TOKEN, TEACHER_CHAT_ID, txt)
+    return {"ok": ok}
+
+# ---------- Basic root ----------
+@app.get("/")
+async def root():
+    return {"service": "zynno-backend", "uptime": datetime.utcnow().isoformat()}
+
+# ---------- Run with: uvicorn main:app --host 0.0.0.0 --port 8000 ----------
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)), reload=True)
