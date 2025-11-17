@@ -37,3 +37,10 @@ __pycache__/
 # editor stuff
 .vscode/
 .idea/
+venv/
+.env
+pip-install.log
+pip-log.txt
+__pycache__/
+*.pyc
+*.pyo
