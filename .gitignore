@@ -21,3 +21,19 @@ build/
 /.pytest_cache
 .vscode/
 .idea/
+# ignore local venv and pip logs
+venv/
+.venv/
+pip-install.log
+pip-log.txt
+
+# caches
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.log
+
+# editor stuff
+.vscode/
+.idea/
