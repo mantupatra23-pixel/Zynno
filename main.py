@@ -1,3 +1,4 @@
+from __future__ import annotations
 # -------- CLEAN IMPORT BLOCK --------
 import os
 import asyncio
