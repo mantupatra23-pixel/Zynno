@@ -13,6 +13,9 @@ from fastapi.middleware.cors import CORSMiddleware
 
 # Models & Validation
 from pydantic import BaseModel, Field, constr
+from models.user import User
+from models.student import Student
+from models.classroom import Classroom
 
 # MongoDB (async driver)
 from motor.motor_asyncio import AsyncIOMotorClient
