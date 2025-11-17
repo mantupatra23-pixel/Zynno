@@ -10,4 +10,3 @@ requests==2.31.0
 python-multipart==0.0.6
 Pillow==8.4.0
 dnspython==2.3.0
-bson==0.5.10
