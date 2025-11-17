@@ -1,30 +1,32 @@
-# main.py — CLEAN IMPORT BLOCK (replace the old one with this)
+# -------- CLEAN IMPORT BLOCK --------
 import os
 import asyncio
 import logging
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
-# FastAPI core imports
+# FastAPI core
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Form, Header
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-# Models & Validation
-from pydantic import BaseModel, Field, constr
+# Models (your custom models)
 from models.user import User
 from models.student import Student
 from models.classroom import Classroom
 
-# MongoDB (async driver)
+# Pydantic base
+from pydantic import BaseModel, Field, constr
+
+# MongoDB driver
 from motor.motor_asyncio import AsyncIOMotorClient
 from bson import ObjectId
 
-# External requests / http client
+# External HTTP client
 import httpx
 
-# Environment loader
+# Env loader
 from dotenv import load_dotenv
 load_dotenv()
 
