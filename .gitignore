@@ -3,3 +3,21 @@ pip-install.log
 __pycache__/
 *.pyc
 venv/
+# virtual env
+venv/
+.env
+.env.*
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+pip-install.log
+pip-log.txt
+*.egg-info/
+dist/
+build/
+*.egg
+/.venv
+/.pytest_cache
+.vscode/
+.idea/
