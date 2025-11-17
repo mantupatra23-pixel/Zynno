@@ -1,10 +1,10 @@
 fastapi
 uvicorn[standard]
+motor
 python-dotenv
 httpx
-motor
-pydantic
-reportlab
-pytesseract
-Pillow
+requests
 python-multipart
+boto3
+pydantic
+python-jose    # (अगर JWT/auth use कर रहे हो)/
