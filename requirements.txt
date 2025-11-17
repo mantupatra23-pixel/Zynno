@@ -8,3 +8,4 @@ python-multipart
 boto3
 pydantic
 python-jose    # (अगर JWT/auth use कर रहे हो)/
+pillow==10.0.1
