@@ -7,6 +7,5 @@ httpx==0.24.1
 requests==2.31.0
 python-multipart==0.0.6
 Pillow==9.5.0
-python-telegram-bot==13.15
-bson==0.5.10
 dnspython==2.3.0
+bson==0.5.10
