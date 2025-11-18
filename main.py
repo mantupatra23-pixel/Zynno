@@ -731,7 +731,8 @@ from fastapi import UploadFile, File
 from motor.motor_asyncio import AsyncIOMotorGridFSBucket
 import io
 from PIL import Image
-import pytesseract
+
+# import pytesseract
 
 # ensure gridfs bucket available on startup if db present
 gridfs_bucket = None
