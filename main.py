@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 # -------- CLEAN IMPORT BLOCK --------
 import os
 import asyncio
@@ -7,8 +8,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
 # FastAPI core
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Form, Header
-from fastapi import Request
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -26,6 +26,10 @@ from bson import ObjectId
 
 # External HTTP client
 import httpx
+
+# OCR / Image processing
+import pytesseract
+from PIL import Image
 
 # Env loader
 from dotenv import load_dotenv
