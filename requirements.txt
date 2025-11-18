@@ -6,7 +6,7 @@ python-dotenv==1.0.0
 requests==2.31.0
 python-multipart==0.0.6
 dnspython==2.3.0
-pytesseract==0.3.11
+pytesseract==0.3.8
 Pillow==10.0.0
-pytesseract==0.3.10
+pytesseract==0.3.8
 httptools==0.5.0
