@@ -172,27 +172,38 @@ async def shutdown():
     if mongo_client:
         mongo_client.close()
 
-# ---------- Health -----------
+# ------------ Health ------------
 @app.get("/health")
 async def health():
     """
-    Health endpoint returns {"status":"ok","db": True/False}
+    Health endpoint returns {"status":"ok", "db": True/False}
     Uses mongo_client.admin.command("ping") to check DB connectivity.
     """
     info = {"status": "ok", "db": False}
+
     try:
-        # make sure mongo_client exists and is connected
+        # check mongo client first
         if mongo_client is None:
             # no client configured
             info["db"] = False
         else:
-            # use the admin database ping command (recommended)
-            await mongo_client.admin.command("ping")
-            info["db"] = True
+            # try pinging the admin database
+            try:
+                # for motor (AsyncIOMotorClient) this is an awaitable
+                await mongo_client.admin.command("ping")
+                info["db"] = True
+            except Exception as e:
+                # ping failed - log and keep info["db"] False
+                try:
+                    logger.warning("Health DB ping failed: %s", e)
+                except Exception:
+                    # logger might not be configured; ignore logging error
+                    pass
+                info["db"] = False
     except Exception as e:
-        # log the exception (logger must be defined earlier in your file)
+        # Unexpected error in health check - log and return db False
         try:
-            logger.warning("Health DB ping failed: %s", e)
+            logger.exception("Unexpected error in health check: %s", e)
         except Exception:
             pass
         info["db"] = False
