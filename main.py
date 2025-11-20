@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 
 # FastAPI core
-from fastapi import FastAPI, HTTPException, Request, Depends, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request, Depends, BackgroundTasks, Header
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
