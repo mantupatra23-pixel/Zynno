@@ -175,13 +175,16 @@ async def shutdown():
 # ---------- Health ----------
 @app.get("/health")
 async def health():
+    global mongo_client
     info = {"status": "ok", "db": False}
+
     try:
-        if db:
-            await db.command("ping")
+        if mongo_client is not None:
+            await mongo_client.db.command("ping")
             info["db"] = True
     except Exception as e:
         logger.warning("Health DB ping failed: %s", e)
+
     return info
 
 # ---------- Submit doubt (student facing) ----------
