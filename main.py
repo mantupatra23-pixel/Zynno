@@ -172,18 +172,30 @@ async def shutdown():
     if mongo_client:
         mongo_client.close()
 
-# ---------- Health ----------
+# ---------- Health -----------
 @app.get("/health")
 async def health():
-    global mongo_client
+    """
+    Health endpoint returns {"status":"ok","db": True/False}
+    Uses mongo_client.admin.command("ping") to check DB connectivity.
+    """
     info = {"status": "ok", "db": False}
-
     try:
-        if mongo_client is not None:
-            await mongo_client.db.command("ping")
+        # make sure mongo_client exists and is connected
+        if mongo_client is None:
+            # no client configured
+            info["db"] = False
+        else:
+            # use the admin database ping command (recommended)
+            await mongo_client.admin.command("ping")
             info["db"] = True
     except Exception as e:
-        logger.warning("Health DB ping failed: %s", e)
+        # log the exception (logger must be defined earlier in your file)
+        try:
+            logger.warning("Health DB ping failed: %s", e)
+        except Exception:
+            pass
+        info["db"] = False
 
     return info
 
